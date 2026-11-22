@@ -459,7 +459,7 @@ let fresh = false, animating = false;
 let picked = null;          // 현재 문제에서 고른 보기(미제출)
 let noteFilter = '전체';
 let reg = {subject:'회계원리', chapter_order:'', chapter_name:'', question_text:'', c:['','','','',''], answer:'1', field_story:'', hint:'', micro:'', dialogue:'', visual:null, image:null, addToday:true};
-let ai = load(LS.ai, {key:'', model:'claude-sonnet-5-5'});
+let ai = load(LS.ai, {key:'', model:'gemini-2.5-flash'});
 
 /* ============ 동기부여: XP · 레벨 · 연속 학습 · 컨페티 ============ */
 let stats = load(LS.st, {xp:0, streak:0, best:0, last:null, days:{}, combo:0, dday:null});
@@ -773,9 +773,9 @@ function renderRegister(){
     <div class="drop" style="margin-top:12px">${reg.image ? `<img class="photo-thumb" style="margin:0 auto 10px" src="${reg.image}" alt="업로드 미리보기">` : '<div style="font-size:30px">🖼️</div>사진을 선택하세요'}
       <div class="row" style="justify-content:center"><button class="btn" data-action="addphoto">${reg.image ? '사진 변경' : '사진 선택 / 촬영'}</button>${reg.image ? '<button class="btn danger" data-action="rmphoto">사진 제거</button>' : ''}<button class="btn pri" data-action="ocr" ${reg.image ? '' : 'disabled'}>🔍 AI로 문제 추출</button></div></div>
     <details class="tg" style="margin-top:10px" ${hasKey ? '' : 'open'}><summary>🔑 AI 설정 (선택) ${hasKey ? '· 키 저장됨' : ''}</summary><div class="body">
-      <div class="mute">Anthropic API 키는 이 브라우저(localStorage)에만 저장되고 api.anthropic.com으로만 전송됩니다. 개인 PC에서만 사용하세요.</div>
-      <label class="f">API 키</label><input type="password" id="aikey" value="${esc(ai.key)}" placeholder="sk-ant-..." autocomplete="off">
-      <label class="f">모델</label><input type="text" id="aimodel" value="${esc(ai.model)}">
+      <div class="mute">Google AI Studio(Gemini) API 키입니다. 로그인한 내 계정에만 저장되고 Google API로만 전송됩니다.</div>
+      <label class="f">API 키</label><input type="password" id="aikey" value="${esc(ai.key)}" placeholder="AIza..." autocomplete="off">
+      <label class="f">모델</label><input type="text" id="aimodel" value="${esc(/^claude/i.test(ai.model||'') ? 'gemini-2.5-flash' : ai.model)}">
       <div class="row" style="margin-top:8px"><button class="btn sm" data-action="aisave">설정 저장</button></div></div></details></div>
   <div class="card"><h2 style="margin:0 0 4px">✍️ 문제 입력 / 편집</h2>
     <div class="grid2"><div><label class="f">과목</label><select data-f="subject">${[...SUBJECTS,'기타'].map(s => `<option ${reg.subject===s?'selected':''}>${s}</option>`).join('')}</select></div>
@@ -868,15 +868,16 @@ $('#photo').addEventListener('change', async e => {
   try { reg.image = await downscale(f); tab = 'register'; render(); window.scrollTo(0,0); toast('사진을 불러왔어요. 직접 입력하거나 AI 추출을 눌러보세요'); }
   catch (err) { toast(err.message); }
 });
-async function callClaude(prompt, imageUrl){
-  const content = [];
-  if (imageUrl) content.push({type:'image', source:{type:'base64', media_type:'image/jpeg', data: imageUrl.split(',')[1]}});
-  content.push({type:'text', text: prompt});
-  const r = await fetch('https://api.anthropic.com/v1/messages', {method:'POST',
-    headers:{'content-type':'application/json','x-api-key':ai.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body: JSON.stringify({model: ai.model || 'claude-sonnet-5-5', max_tokens: 2500, messages:[{role:'user', content}]})});
+async function callClaude(prompt, imageUrl){   // 이름은 유지, 실제로는 Google Gemini(AI Studio) 호출
+  const parts = [];
+  if (imageUrl) parts.push({inline_data:{mime_type:'image/jpeg', data: imageUrl.split(',')[1]}});
+  parts.push({text: prompt});
+  const model = (ai.model && !/^claude/i.test(ai.model)) ? ai.model : 'gemini-2.5-flash';
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {method:'POST',
+    headers:{'content-type':'application/json','x-goog-api-key':ai.key},
+    body: JSON.stringify({contents:[{role:'user', parts}], generationConfig:{responseMimeType:'application/json', maxOutputTokens:4096}})});
   const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || ('HTTP ' + r.status));
-  const t = (j.content || []).map(c => c.text || '').join(''), m = t.match(/\{[\s\S]*\}/);
+  const t = ((j.candidates || [])[0]?.content?.parts || []).map(c => c.text || '').join(''), m = t.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('JSON 응답을 찾지 못했습니다'); return JSON.parse(m[0]);
 }
 const normSubj = s => /회계/.test(s||'') ? '회계원리' : /시설/.test(s||'') ? '시설개론' : /민법/.test(s||'') ? '민법' : (s ? '기타' : reg.subject);
@@ -952,7 +953,7 @@ document.addEventListener('click', e => {
     case 'rmphoto': reg.image = null; render(); break;
     case 'ocr': doOcr(); break;
     case 'gen': doGen(); break;
-    case 'aisave': ai = {key: $('#aikey').value.trim(), model: $('#aimodel').value.trim() || 'claude-sonnet-5-5'}; save(LS.ai, ai); toast('AI 설정을 저장했어요'); render(); break;
+    case 'aisave': ai = {key: $('#aikey').value.trim(), model: $('#aimodel').value.trim() || 'gemini-2.5-flash'}; save(LS.ai, ai); toast('AI 설정을 저장했어요'); render(); break;
     case 'regsave': saveReg(); break;
     case 'regclear': reg = {...reg, chapter_order:'', chapter_name:'', question_text:'', c:['','','','',''], answer:'1', field_story:'', hint:'', micro:'', dialogue:'', visual:null, image:null}; render(); break;
     case 'delq': if (confirm('이 문제를 삭제할까요?')) { questions = questions.filter(q => q.id !== el.dataset.id); save(LS.q, questions); ensureSession(); render(); } break;
