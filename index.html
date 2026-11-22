@@ -307,6 +307,7 @@ body{background:linear-gradient(180deg,#d4edf9 0%,#e3f5f1 55%,#dff3d8 100%) fixe
 .cb{display:block;width:84%;height:8px;border-radius:99px;background:rgba(255,255,255,.8);overflow:hidden}
 .cb u{display:block;height:100%;border-radius:99px;background:#5cc2a4}
 .c1{background:#dcecff;border-color:#a9cdf5}.c2{background:#dcf3e0;border-color:#a8dcb4}.c3{background:#fff0c9;border-color:#f0d78a}.c4{background:#ffe0e4;border-color:#f5b7c0}
+.photo-fold{margin:8px 0}.photo-fold summary{cursor:pointer;font-weight:700;font-size:13px;color:var(--accent);list-style:none;padding:6px 0}.photo-fold summary::-webkit-details-marker{display:none}
 </style>
 </head>
 <body>
@@ -630,7 +631,7 @@ function questionCard(q){
     <div class="row"><span class="chip subj" style="--sc:${info.color}">${info.icon} ${esc(q.subject)}</span><span class="mute">${q.chapter_order}단원 · ${esc(q.chapter_name)}</span><span class="sp"></span>${kind}${v.isVariant ? '<span class="chip ok">✨ 3회독 변형</span>' : ''}<span class="mute">${q.attempt_count}회 풀이</span></div>`;
   if (v.field_story) h += `<div class="story"><div class="lab">${info.icon} 현장 스토리 · ${info.place}</div>${esc(v.field_story)}</div>`;
   h += `<div class="qtext">${esc(v.question_text)}</div>`;
-  if (q.image) h += `<img class="photo-thumb" src="${q.image}" alt="문제 원본 사진">`;
+  if (q.image) h += `<details class="photo-fold"><summary>📷 원본 사진 보기</summary><img class="photo-thumb" src="${q.image}" alt="문제 원본 사진" loading="lazy"></details>`;
   h += v.choices.map((c,i) => {
     let cls = '';
     if (ans) { if (i+1 === v.answer) cls = 'right'; else if (i+1 === ans.picked) cls = 'wrong'; }
