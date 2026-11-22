@@ -997,7 +997,7 @@ const cloudKind = k => k === LS.q ? 'question' : k === LS.n ? 'note' : 'state';
 function cloudRows(k, v){
   if (k === LS.q) return (v || []).map(q => [q.id, q]);
   if (k === LS.n) return (v || []).map(n => [n.id, n]);
-  if (k === LS.s || k === LS.g || k === LS.st) return [[k, {v}]];
+  if (k === LS.s || k === LS.g || k === LS.st || k === LS.ai) return [[k, {v}]];
   return null;
 }
 function cloudPush(k, v){
@@ -1018,17 +1018,19 @@ async function cloudFlush(k, v){
     if (gone.length) { const {error} = await cloud.sb.from('mystudy').delete().eq('kind', kind).in('id', gone); if (error) throw error; gone.forEach(id => delete cloud.synced[kind + '/' + id]); }
   } catch (e) { cloud.ok = false; toast('서버 저장에 실패했어요. 이 기기에는 저장됐어요'); console.warn(e); }
 }
+const cloudPushNow = (k, v) => setTimeout(() => cloudFlush(k, v), 1500);
 async function cloudPull(){
   const {data, error} = await cloud.sb.from('mystudy').select('kind,id,data').limit(10000);
   if (error) throw error;
   cloud.synced = {}; data.forEach(r => { cloud.synced[r.kind + '/' + r.id] = JSON.stringify(r.data); });
-  if (!data.length) { cloud.ok = true; for (const k of [LS.q, LS.n, LS.s, LS.g, LS.st]) await cloudFlush(k, k === LS.q ? questions : k === LS.n ? notes : k === LS.s ? session : k === LS.g ? goal : stats); return; }
+  if (!data.length) { cloud.ok = true; for (const k of [LS.q, LS.n, LS.s, LS.g, LS.st, LS.ai]) await cloudFlush(k, k === LS.q ? questions : k === LS.n ? notes : k === LS.s ? session : k === LS.g ? goal : k === LS.ai ? ai : stats); return; }
   cloud.pulling = true;
   const qs = data.filter(r => r.kind === 'question').map(r => r.data), ns = data.filter(r => r.kind === 'note').map(r => r.data);
   const st = k => { const r = data.find(x => x.kind === 'state' && x.id === k); return r ? r.data.v : undefined; };
   if (qs.length) questions = qs; notes = ns;
+  if (st(LS.ai) !== undefined) ai = st(LS.ai); else if (ai && ai.key) cloudPushNow(LS.ai, ai);
   if (st(LS.g) !== undefined) goal = st(LS.g); if (st(LS.s) !== undefined) session = st(LS.s); if (st(LS.st) !== undefined) stats = st(LS.st);
-  save(LS.q, questions); save(LS.n, notes); save(LS.g, goal); save(LS.s, session); save(LS.st, stats);
+  save(LS.q, questions); save(LS.n, notes); save(LS.g, goal); save(LS.s, session); save(LS.st, stats); save(LS.ai, ai);
   cloud.pulling = false; cloud.ok = true;
   if (typeof ensureSession === 'function') ensureSession();
 }
