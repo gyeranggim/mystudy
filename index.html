@@ -322,6 +322,7 @@ body{background:linear-gradient(180deg,#d4edf9 0%,#e3f5f1 55%,#dff3d8 100%) fixe
 <button id="selbtn">📌 암기노트에 저장</button>
 <div id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 /* ============ 유틸 ============ */
 const $ = s => document.querySelector(s);
@@ -336,8 +337,11 @@ const SUBJ = {
 };
 const subjInfo = s => SUBJ[s] || {icon:'📘', color:'#667085', roles:['실무자','관리소장'], place:'현장'};
 const LS = {q:'hj_questions_v1', n:'hj_notes_v1', s:'hj_today_v1', ai:'hj_ai_v1', g:'hj_goal_v1', st:'hj_stats_v1'};
+const SB_URL = 'https://wuyhoagraxdpiuvpfruy.supabase.co', SB_KEY = 'sb_publishable_9HtmORKBHhavdRCeI1dvLA_Q7RKvsTT';
+const cloud = {sb: null, user: null, ready: false, ok: false, pulling: false, synced: {}, timers: {}, msg: ''};
+try { if (window.supabase) cloud.sb = window.supabase.createClient(SB_URL, SB_KEY); } catch (e) {}
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { toast('브라우저 저장 공간이 부족합니다'); return false; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); if (typeof cloudPush === 'function') cloudPush(k, v); return true; } catch (e) { toast('브라우저 저장 공간이 부족합니다'); return false; } };
 const ymd = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const todayStr = () => ymd(new Date());
 let toastT;
@@ -757,7 +761,7 @@ function renderHome(){
       <button class="btn pri sm" data-action="resume">${finished ? '한 세트 더' : '이어서 풀기'} →</button></div>
       <img class="doribig" src="assets/dori.png" alt="다람쥐 도리"></div>
     <div class="sectt"><b>학습 카테고리</b><span>캐릭터를 눌러 시작</span></div>
-    <div class="catgrid">${cats}</div>`;
+    <div class="catgrid">${cats}</div>${cloudBar()}`;
 }
 
 /* ============ 렌더: 문제 등록 ============ */
@@ -809,6 +813,10 @@ function renderNotes(){
 
 /* ============ 렌더 공통 ============ */
 function render(){
+  if (cloud.sb && !cloud.user) {   // 로그인 전: 로그인 화면(또는 확인 중)만 보여줌
+    document.body.classList.add('splashing'); document.body.classList.remove('ishome');
+    $('#app').innerHTML = loginHtml(); return;
+  }
   document.body.classList.toggle('splashing', tab === 'splash'); document.body.classList.toggle('ishome', tab === 'home');
   $('#app').innerHTML = tab === 'splash' ? renderSplash() : tab === 'home' ? renderHome() : tab === 'today' ? renderToday() :tab === 'register' ? renderRegister() : renderNotes();
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
@@ -924,6 +932,8 @@ document.addEventListener('click', e => {
     case 'pick': picked = +el.dataset.n; render(); break;
     case 'submit': submitAnswer(); break;
     case 'goto': session.idx = +el.dataset.i; session.done = false; picked = null; save(LS.s, session); render(); break;
+    case 'login': doLogin(); break;
+    case 'logout': cloudLogout(); break;
     case 'enter': try { sessionStorage.setItem('hj_seen', '1'); } catch (e) {} tab = 'home'; render(); window.scrollTo(0,0); break;
     case 'rename': { const v = prompt('이름(닉네임)을 입력하세요', stats.name || ''); if (v !== null) { stats.name = v.trim().slice(0, 12) || null; save(LS.st, stats); render(); } break; }
     case 'folder': case 'allsubj': {
@@ -967,6 +977,86 @@ document.addEventListener('input', e => {
   const f = el.dataset.f; if (!f || el.type === 'checkbox') return;
   if (/^c[0-4]$/.test(f)) reg.c[+f[1]] = el.value; else reg[f] = el.value;
 });
+
+/* ============ Supabase 로그인 + 데이터 동기화 ============ */
+function loginHtml(){
+  if (!cloud.ready) return `<section class="splash"><img class="stitle" src="assets/dori_title.png" alt=""><div class="shint">불러오는 중...</div></section>`;
+  const f = 'width:100%;box-sizing:border-box;padding:13px 14px;border:2px solid #a9d6e6;border-radius:14px;font:inherit;font-size:16px;margin-bottom:10px;background:#fff;color:#1f3a4a';
+  return `<section class="splash" style="cursor:default"><img class="stitle" src="assets/dori_title.png" alt="도리의 주택관리사 합격단">
+    <img src="assets/dori.png" alt="" style="width:34%;max-width:140px;margin:6px 0 10px">
+    <div style="width:min(86%,340px)"><input id="lgmail" type="email" autocomplete="username" placeholder="이메일" style="${f}">
+    <input id="lgpw" type="password" autocomplete="current-password" placeholder="비밀번호" style="${f}">
+    <button class="btn pri big" style="width:100%" data-action="login">로그인</button>
+    <div class="shint" id="lgmsg" style="text-align:center">${esc(cloud.msg)}</div></div></section>`;
+}
+function cloudBar(){
+  if (!cloud.sb) return '';
+  return `<div class="mute" style="text-align:center;font-size:12px;margin-top:18px">☁️ ${cloud.user ? esc(cloud.user.email) + (cloud.ok ? ' · 동기화됨' : ' · 동기화 오류(이 기기에만 저장 중)') : ''} <button class="btn sm" data-action="logout" style="margin-left:6px">로그아웃</button></div>`;
+}
+const cloudKind = k => k === LS.q ? 'question' : k === LS.n ? 'note' : 'state';
+function cloudRows(k, v){
+  if (k === LS.q) return (v || []).map(q => [q.id, q]);
+  if (k === LS.n) return (v || []).map(n => [n.id, n]);
+  if (k === LS.s || k === LS.g || k === LS.st) return [[k, {v}]];
+  return null;
+}
+function cloudPush(k, v){
+  if (!cloud.user || !cloud.ok || cloud.pulling || !cloudRows(k, v)) return;
+  clearTimeout(cloud.timers[k]); cloud.timers[k] = setTimeout(() => cloudFlush(k, v), 700);
+}
+async function cloudFlush(k, v){
+  const kind = cloudKind(k), rows = cloudRows(k, v); if (!rows) return;
+  const ups = [], ids = new Set(rows.map(r => r[0]));
+  rows.forEach(([id, data]) => { const s = JSON.stringify(data); if (cloud.synced[kind + '/' + id] !== s) ups.push({kind, id, data, _s: s}); });
+  const gone = kind === 'state' ? [] : Object.keys(cloud.synced).filter(x => x.startsWith(kind + '/') && !ids.has(x.slice(kind.length + 1))).map(x => x.slice(kind.length + 1));
+  try {
+    for (let i = 0; i < ups.length; i += 10) {
+      const b = ups.slice(i, i + 10), now = new Date().toISOString();
+      const {error} = await cloud.sb.from('mystudy').upsert(b.map(({kind, id, data}) => ({kind, id, data, updated_at: now})), {onConflict: 'user_id,kind,id'});
+      if (error) throw error; b.forEach(r => { cloud.synced[r.kind + '/' + r.id] = r._s; });
+    }
+    if (gone.length) { const {error} = await cloud.sb.from('mystudy').delete().eq('kind', kind).in('id', gone); if (error) throw error; gone.forEach(id => delete cloud.synced[kind + '/' + id]); }
+  } catch (e) { cloud.ok = false; toast('서버 저장에 실패했어요. 이 기기에는 저장됐어요'); console.warn(e); }
+}
+async function cloudPull(){
+  const {data, error} = await cloud.sb.from('mystudy').select('kind,id,data').limit(10000);
+  if (error) throw error;
+  cloud.synced = {}; data.forEach(r => { cloud.synced[r.kind + '/' + r.id] = JSON.stringify(r.data); });
+  if (!data.length) { cloud.ok = true; for (const k of [LS.q, LS.n, LS.s, LS.g, LS.st]) await cloudFlush(k, k === LS.q ? questions : k === LS.n ? notes : k === LS.s ? session : k === LS.g ? goal : stats); return; }
+  cloud.pulling = true;
+  const qs = data.filter(r => r.kind === 'question').map(r => r.data), ns = data.filter(r => r.kind === 'note').map(r => r.data);
+  const st = k => { const r = data.find(x => x.kind === 'state' && x.id === k); return r ? r.data.v : undefined; };
+  if (qs.length) questions = qs; notes = ns;
+  if (st(LS.g) !== undefined) goal = st(LS.g); if (st(LS.s) !== undefined) session = st(LS.s); if (st(LS.st) !== undefined) stats = st(LS.st);
+  save(LS.q, questions); save(LS.n, notes); save(LS.g, goal); save(LS.s, session); save(LS.st, stats);
+  cloud.pulling = false; cloud.ok = true;
+  if (typeof ensureSession === 'function') ensureSession();
+}
+async function cloudStart(user){
+  cloud.user = user; cloud.ok = false;
+  try { await cloudPull(); } catch (e) { cloud.pulling = false; cloud.ok = false; toast('서버에서 불러오지 못했어요. 이 기기 데이터로 열어요'); console.warn(e); }
+  render();
+}
+async function doLogin(){
+  const email = ($('#lgmail') || {}).value, password = ($('#lgpw') || {}).value, m = $('#lgmsg');
+  if (!email || !password) { m.textContent = '이메일과 비밀번호를 입력하세요'; return; }
+  m.textContent = '로그인 중...';
+  const {data, error} = await cloud.sb.auth.signInWithPassword({email: email.trim(), password});
+  if (error) { m.textContent = '로그인 실패: 이메일/비밀번호를 확인하세요'; return; }
+  await cloudStart(data.user);
+}
+async function cloudLogout(){
+  if (!confirm('로그아웃할까요? (이 기기의 임시 데이터는 지워지고, 서버 데이터는 그대로 있어요)')) return;
+  try { await cloud.sb.auth.signOut(); } catch (e) {}
+  Object.values(LS).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  location.reload();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'lgpw' || e.target.id === 'lgmail')) doLogin(); });
+(async () => {
+  if (!cloud.sb) { cloud.ready = true; return; }
+  try { const {data} = await cloud.sb.auth.getSession(); cloud.ready = true; if (data.session) await cloudStart(data.session.user); else render(); }
+  catch (e) { cloud.ready = true; render(); }
+})();
 
 render();
 </script>
